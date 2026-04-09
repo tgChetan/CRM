@@ -1,0 +1,17 @@
+# Enable Rewrite Engine
+RewriteEngine On
+RewriteBase /
+
+# Redirect direct access to admin.php to clean URL
+RewriteCond %{THE_REQUEST} /admin\.php [NC]
+RewriteRule ^admin\.php$ / [R=301,L]
+
+# Load assign_agent.php when /assign_agent is requested
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^assign_agent$ assign_agent.php [L]
+
+# Set default file
+<IfModule mod_dir.c>
+    DirectoryIndex admin.php
+</IfModule>
