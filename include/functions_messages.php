@@ -15,7 +15,7 @@
  * 2. Return the messages grouped by conversation
  * 3. Return the conversations or messages older than the given date
  * 4. Return the conversations older than the given date of the user with the given ID
- * 5. Search conversations by searching user details and messages contents
+ * 5. Search conversations by searching user details, messages contents, and mobile number (partials and complete both)
  * 6. Search conversations of the user with the given ID
  * 7. Return the conversations of a user
  * 8. Return the ID of the last user conversation if any, otherwise create a new conversation and return its ID
@@ -131,7 +131,72 @@ function sb_get_new_user_conversations($user_id, $datetime) {
 }
 
 function sb_search_conversations($search) {
-    $search = trim(sb_db_escape(mb_strtolower((string) $search)));
+    $search_raw = mb_strtolower(trim((string) $search));
+    $search = sb_db_escape($search_raw);
+    $search_digits_raw = preg_replace('/\D+/', '', $search_raw);
+    $is_phone_like = preg_match('/^[\d\s\+\-\(\)]+$/', $search_raw) === 1;
+
+    // Fast phone path: prioritize phone matching and sort matched users by recent activity.
+    if ($is_phone_like && strlen($search_digits_raw) >= 4) {
+        $digits_length = strlen($search_digits_raw);
+        $users = [];
+        $search_digits = sb_db_escape($search_digits_raw);
+        $normalized_value = 'REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(ud.value, " ", ""), "-", ""), "(", ""), ")", ""), "+", ""), ".", ""), "/", "")';
+
+        // Exact and normalized full-number matching.
+        if ($digits_length >= 10) {
+            $phone_full = $search_digits_raw;
+            $phone_last10 = substr($search_digits_raw, -10);
+            $phone_variants = [$phone_full, $phone_last10, '+' . $phone_full, '00' . $phone_full, '+' . $phone_last10, '00' . $phone_last10];
+            $phone_variants = array_values(array_unique(array_filter($phone_variants)));
+            $phone_values = [];
+
+            for ($i = 0; $i < count($phone_variants); $i++) {
+                $phone_values[] = '"' . sb_db_escape($phone_variants[$i]) . '"';
+            }
+
+            if (!empty($phone_values)) {
+                $users = sb_db_get('SELECT ud.user_id FROM sb_users_data ud JOIN sb_users u ON u.id = ud.user_id WHERE ud.slug = "phone" AND ud.value IN (' . implode(',', $phone_values) . ') GROUP BY ud.user_id ORDER BY MAX(u.last_activity) DESC LIMIT 50', false);
+            }
+
+            if (empty($users)) {
+                $users = sb_db_get('SELECT ud.user_id FROM sb_users_data ud JOIN sb_users u ON u.id = ud.user_id WHERE ud.slug = "phone" AND RIGHT(' . $normalized_value . ', 10) = "' . sb_db_escape($phone_last10) . '" GROUP BY ud.user_id ORDER BY MAX(u.last_activity) DESC LIMIT 50', false);
+            }
+        }
+
+        // Partial prefix matching for digit input (e.g. 45453).
+        if (empty($users)) {
+            $users = sb_db_get('SELECT ud.user_id FROM sb_users_data ud JOIN sb_users u ON u.id = ud.user_id WHERE ud.slug = "phone" AND (ud.value LIKE "' . $search_digits . '%" OR ud.value LIKE "+' . $search_digits . '%" OR ud.value LIKE "00' . $search_digits . '%" OR RIGHT(' . $normalized_value . ', 10) LIKE "' . $search_digits . '%") GROUP BY ud.user_id ORDER BY MAX(u.last_activity) DESC LIMIT 50', false);
+        }
+
+        if (!empty($users)) {
+            $user_ids = [];
+            for ($i = 0; $i < count($users); $i++) {
+                $user_id = intval($users[$i]['user_id']);
+                if ($user_id > 0) {
+                    $user_ids[] = $user_id;
+                }
+            }
+            $user_ids = array_values(array_unique($user_ids));
+
+            if (!empty($user_ids)) {
+                sb_db_query('DROP TEMPORARY TABLE IF EXISTS sb_latest_messages');
+                sb_db_query('CREATE TEMPORARY TABLE sb_latest_messages (id BIGINT PRIMARY KEY) ENGINE=MEMORY AS SELECT MAX(id) AS id FROM sb_messages GROUP BY conversation_id');
+                $query = SELECT_CONVERSATIONS . 'FROM sb_latest_messages L JOIN sb_messages A ON A.id = L.id JOIN sb_users B ON B.id = A.user_id JOIN sb_conversations C ON C.id = A.conversation_id WHERE C.user_id IN (' . implode(',', $user_ids) . ')' . sb_routing_and_department_db('C') . ' ORDER BY FIELD(C.user_id,' . implode(',', $user_ids) . '), A.id DESC LIMIT 50';
+                $result = sb_db_get($query, false);
+                if (isset($result) && is_array($result)) {
+                    return sb_get_conversations_users($result);
+                }
+                return sb_error('db-error', 'sb_search_conversations', $result);
+            }
+        }
+
+        // For complete phone-like input, preserve the current fast no-match behavior.
+        if ($digits_length >= 10) {
+            return [];
+        }
+    }
+
     $search_first = explode(' ', $search);
     $numeric_filters = '';
     $tags_filter = '';
@@ -147,7 +212,8 @@ function sb_search_conversations($search) {
     if (!sb_get_setting('disable-tags')) {
         $tags_filter = ' OR LOWER(C.tags) LIKE "%' . $search . '%"';
     }
-    $query = SELECT_CONVERSATIONS . 'FROM sb_messages A JOIN sb_users B ON B.id = A.user_id JOIN sb_conversations C ON C.id = A.conversation_id' . sb_routing_and_department_db('C') . ' WHERE (LOWER(A.message) LIKE "%' . $search . '%" OR LOWER(A.attachments) LIKE "%' . $search . '%" OR LOWER(B.first_name) LIKE "%' . $search_first . '%" OR LOWER(B.last_name) LIKE "%' . $search_first . '%" OR LOWER(B.email) LIKE "%' . $search . '%" OR LOWER(C.title) LIKE "%' . $search . '%"' . $numeric_filters . $tags_filter . ') GROUP BY A.conversation_id ORDER BY A.creation_time DESC';
+
+    $query = SELECT_CONVERSATIONS . 'FROM sb_messages A JOIN sb_users B ON B.id = A.user_id JOIN sb_conversations C ON C.id = A.conversation_id' . sb_routing_and_department_db('C') . ' WHERE (LOWER(A.message) LIKE "%' . $search . '%" OR LOWER(A.attachments) LIKE "%' . $search . '%" OR LOWER(B.first_name) LIKE "%' . $search_first . '%" OR LOWER(B.last_name) LIKE "%' . $search_first . '%" OR LOWER(B.email) LIKE "%' . $search . '%" OR LOWER(C.title) LIKE "%' . $search . '%"' . $numeric_filters . $tags_filter . ') GROUP BY A.conversation_id ORDER BY A.creation_time DESC LIMIT 50';
     $result = sb_db_get($query, false);
     if (isset($result) && is_array($result)) {
         return sb_get_conversations_users($result);

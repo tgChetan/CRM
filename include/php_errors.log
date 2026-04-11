@@ -10710,3 +10710,19 @@ Stack trace:
 #3 C:\xampp\htdocs\crm\include\ajax.php(49): sb_ajax_execute()
 #4 {main}
   thrown in C:\xampp\htdocs\crm\include\functions.php on line 143
+[09-Apr-2026 18:26:32 Asia/Kolkata] PHP Fatal error:  Uncaught mysqli_sql_exception: Column 'creation_time' in where clause is ambiguous in C:\xampp\htdocs\crm\include\functions.php:143
+Stack trace:
+#0 C:\xampp\htdocs\crm\include\functions.php(143): mysqli->query('SELECT sb_users...')
+#1 C:\xampp\htdocs\crm\include\functions_users.php(1008): sb_db_get('SELECT sb_users...', false)
+#2 C:\xampp\htdocs\crm\include\ajax.php(134): sb_get_new_users('2026-04-09 12:5...', '', '')
+#3 C:\xampp\htdocs\crm\include\ajax.php(49): sb_ajax_execute()
+#4 {main}
+  thrown in C:\xampp\htdocs\crm\include\functions.php on line 143
+[10-Apr-2026 12:48:04 Asia/Kolkata] PHP Fatal error:  Uncaught mysqli_sql_exception: Column 'creation_time' in where clause is ambiguous in C:\xampp\htdocs\crm\include\functions.php:143
+Stack trace:
+#0 C:\xampp\htdocs\crm\include\functions.php(143): mysqli->query('SELECT sb_users...')
+#1 C:\xampp\htdocs\crm\include\functions_users.php(1008): sb_db_get('SELECT sb_users...', false)
+#2 C:\xampp\htdocs\crm\include\ajax.php(134): sb_get_new_users('2026-04-10 07:1...', '', '')
+#3 C:\xampp\htdocs\crm\include\ajax.php(49): sb_ajax_execute()
+#4 {main}
+  thrown in C:\xampp\htdocs\crm\include\functions.php on line 143
